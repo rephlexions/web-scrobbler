@@ -13,6 +13,7 @@ import { MalojaTrackMetadata } from '@/core/scrobbler/maloja/maloja.types';
 export default class MalojaScrobbler extends BaseScrobbler<'Maloja'> {
 	public userToken!: string;
 	public userApiUrl!: string;
+	public isLocalOnly = true;
 
 	/** @override */
 	protected getStorageName(): 'Maloja' {
@@ -30,7 +31,7 @@ export default class MalojaScrobbler extends BaseScrobbler<'Maloja'> {
 	}
 
 	/** @override */
-	public getUsedDefinedProperties(): string[] {
+	public getUserDefinedProperties(): string[] {
 		return ['userApiUrl', 'userToken'];
 	}
 

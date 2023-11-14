@@ -78,14 +78,15 @@ function TrackInfo(props: {
 	return (
 		<li class={styles.deleteListing}>
 			<button
-				class={styles.deleteEditButton}
+				class={`${styles.button} ${styles.small} ${styles.marginRight}`}
 				onClick={(event) => {
 					event.stopPropagation();
+					const key = props.key;
 					props.mutate((e) => {
 						if (!e) {
 							return e;
 						}
-						delete e[props.key];
+						delete e[key];
 						localCache.set(e);
 						return {
 							...e,

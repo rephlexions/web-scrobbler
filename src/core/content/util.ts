@@ -34,6 +34,7 @@ export type Separator =
 	| ' \u002d '
 	| ' \u2013 '
 	| ' \u2014 '
+	| ' \u2022 '
 	| ' // '
 	| '\u002d'
 	| '\u2013'
@@ -47,7 +48,8 @@ export type Separator =
 	| '<br/>'
 	| ' by '
 	| ', '
-	| '·';
+	| '·'
+	| ' ·';
 
 /**
  * Separator used to join array of artist names into a single string.

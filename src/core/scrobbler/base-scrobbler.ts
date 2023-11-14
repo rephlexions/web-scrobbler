@@ -66,6 +66,7 @@ export default abstract class BaseScrobbler<K extends keyof ScrobblerModels> {
 	public userApiUrl: string | null = null;
 	public userToken: string | null = null;
 	public arrayProperties: ArrayProperties | null = null;
+	abstract isLocalOnly: boolean;
 
 	constructor() {
 		this.storage = this.initStorage();
@@ -112,7 +113,7 @@ export default abstract class BaseScrobbler<K extends keyof ScrobblerModels> {
 	public async applyUserProperties(
 		props: Record<string, unknown>,
 	): Promise<void> {
-		this.applyProps(props, this.getUsedDefinedProperties());
+		this.applyProps(props, this.getUserDefinedProperties());
 
 		let data = await this.storage.get();
 
@@ -153,13 +154,12 @@ export default abstract class BaseScrobbler<K extends keyof ScrobblerModels> {
 		await this.storage.set(data);
 	}
 
-	// TODO: used -> user
 	/**
 	 * Return a list of user-defined scrobbler properties.
 	 *
 	 * @returns a list of user-defined scrobbler properties.
 	 */
-	public getUsedDefinedProperties(): string[] {
+	public getUserDefinedProperties(): string[] {
 		return [];
 	}
 
@@ -452,7 +452,7 @@ export default abstract class BaseScrobbler<K extends keyof ScrobblerModels> {
 
 	private initStorage() {
 		const sensitiveProps = ['token', 'sessionID', 'sessionName'];
-		sensitiveProps.push(...this.getUsedDefinedProperties());
+		sensitiveProps.push(...this.getUserDefinedProperties());
 
 		const storage = getScrobblerStorage<K>(this.getStorageName());
 

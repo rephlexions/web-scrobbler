@@ -3,7 +3,16 @@ import ScrobbleService, {
 	Scrobbler,
 	ScrobblerLabel,
 } from '@/core/object/scrobble-service';
-import { For, Show, createResource, createSignal, onCleanup } from 'solid-js';
+import {
+	For,
+	Show,
+	createMemo,
+	Match,
+	Switch,
+	createResource,
+	createSignal,
+	onCleanup,
+} from 'solid-js';
 import styles from './components.module.scss';
 import browser from 'webextension-polyfill';
 import Delete from '@suid/icons-material/DeleteOutlined';
@@ -82,74 +91,116 @@ export default function Accounts() {
  * Component that allows the user to sign in and out of a specific scrobbler
  */
 function ScrobblerDisplay(props: { label: ScrobblerLabel }) {
-	const { label } = props;
-	const rawScrobbler = ScrobbleService.getScrobblerByLabel(label);
-	if (!rawScrobbler) {
-		return <></>;
-	}
-	const [session, setSession] = createResource(
-		rawScrobbler.getSession.bind(rawScrobbler),
+	const rawScrobbler = createMemo(() =>
+		ScrobbleService.getScrobblerByLabel(props.label),
 	);
-	const [profileUrl, setProfileUrl] = createResource(
-		rawScrobbler.getProfileUrl.bind(rawScrobbler),
-	);
+	const [session, setSession] = createResource(() => {
+		const scrobbler = rawScrobbler();
+		if (scrobbler) {
+			return scrobbler.getSession();
+		}
+	});
+	const [profileUrl, setProfileUrl] = createResource(() => {
+		const scrobbler = rawScrobbler();
+		if (scrobbler) {
+			return scrobbler.getProfileUrl();
+		}
+	});
+	const [showLocalProps, setShowLocalProps] = createSignal(false);
 
 	const onFocus = async () => {
 		try {
-			if (await rawScrobbler.isReadyForGrantAccess()) {
-				await rawScrobbler.getSession();
+			if (await rawScrobbler()?.isReadyForGrantAccess()) {
+				await rawScrobbler()?.getSession();
 				setSession.refetch();
 				setProfileUrl.refetch();
 			}
 		} catch (err) {
 			debugLog(
-				`${rawScrobbler.getLabel()}: Error while fetching session`,
+				`${rawScrobbler()?.getLabel()}: Error while fetching session`,
 				'warn',
 			);
 			debugLog(err, 'warn');
 		}
 	};
-	window.addEventListener('focus', () => void onFocus());
-	onCleanup(() => window.removeEventListener('focus', () => void onFocus()));
+	const onFocusWrapper = () => {
+		void onFocus();
+	};
+	window.addEventListener('focus', onFocusWrapper);
+	onCleanup(() => window.removeEventListener('focus', onFocusWrapper));
 
 	return (
 		<>
-			<Show
-				when={!session.error && session()}
-				fallback={<SignedOut scrobbler={rawScrobbler} />}
+			<h2>{rawScrobbler()?.getLabel()}</h2>
+			<Switch
+				fallback={
+					<Show when={!showLocalProps()}>
+						<SignedOut scrobbler={rawScrobbler()} />
+					</Show>
+				}
 			>
-				<h2>{rawScrobbler.getLabel()}</h2>
-				<p>
-					{t(
-						'accountsSignedInAs',
-						session()?.sessionName || 'anonymous',
-					)}
-				</p>
-				<div class={styles.buttonContainer}>
-					<a
-						class={styles.linkButton}
-						href={profileUrl.error ? '#' : profileUrl()}
-						target="_blank"
-						rel="noopener noreferrer"
-					>
-						{t('accountsProfile')}
-					</a>
+				<Match when={rawScrobbler()?.isLocalOnly}>
+					<Show when={!session.error && session()}>
+						<p>
+							{t(
+								'accountsSignedInAs',
+								session()?.sessionName || 'anonymous',
+							)}
+						</p>
+					</Show>
+				</Match>
+				<Match when={!session.error && session()}>
+					<p>
+						{t(
+							'accountsSignedInAs',
+							session()?.sessionName || 'anonymous',
+						)}
+					</p>
+					<div class={styles.buttonContainer}>
+						<a
+							class={styles.button}
+							href={profileUrl.error ? '#' : profileUrl()}
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							{t('accountsProfile')}
+						</a>
+						<button
+							class={styles.button}
+							onClick={() =>
+								void (async () => {
+									await rawScrobbler()?.signOut();
+									setSession.refetch();
+									setProfileUrl.refetch();
+								})()
+							}
+						>
+							{t('accountsSignOut')}
+						</button>
+					</div>
+				</Match>
+			</Switch>
+			<Switch>
+				<Match
+					when={
+						!showLocalProps() &&
+						!rawScrobbler()?.isLocalOnly &&
+						(labelHasProperties(rawScrobbler()?.getLabel()) ||
+							labelHasArrayProperties(rawScrobbler()?.getLabel()))
+					}
+				>
 					<button
-						class={styles.resetButton}
-						onClick={() =>
-							void (async () => {
-								await rawScrobbler.signOut();
-								setSession.refetch();
-								setProfileUrl.refetch();
-							})()
-						}
+						class={`${styles.button} ${styles.marginTop}`}
+						onClick={() => setShowLocalProps(true)}
 					>
-						{t('accountsSignOut')}
+						{t('accountsUseLocalInstance')}
 					</button>
-				</div>
-				<Properties scrobbler={rawScrobbler} />
-				<ArrayProperties scrobbler={rawScrobbler} />
-			</Show>
+				</Match>
+				<Match when={showLocalProps() || rawScrobbler()?.isLocalOnly}>
+					<Properties scrobbler={rawScrobbler()} />
+					<ArrayProperties scrobbler={rawScrobbler()} />
+				</Match>
+			</Switch>
 		</>
 	);
 }
@@ -157,17 +208,15 @@ function ScrobblerDisplay(props: { label: ScrobblerLabel }) {
 /**
  * Text to show when a user is not signed into a scrobbler.
  */
-function SignedOut(props: { scrobbler: Scrobbler }) {
-	const { scrobbler } = props;
+function SignedOut(props: { scrobbler: Scrobbler | null }) {
 	return (
 		<>
-			<h2>{scrobbler.getLabel()}</h2>
 			<p>{t('accountsNotSignedIn')}</p>
 			<button
-				class={styles.resetButton}
+				class={styles.button}
 				onClick={() =>
 					void (async () => {
-						const url = await scrobbler.getAuthUrl();
+						const url = await props.scrobbler?.getAuthUrl();
 						if (!url) {
 							return new Error('No auth URL');
 						}
@@ -177,8 +226,6 @@ function SignedOut(props: { scrobbler: Scrobbler }) {
 			>
 				{t('accountsSignIn')}
 			</button>
-			<Properties scrobbler={scrobbler} />
-			<ArrayProperties scrobbler={scrobbler} />
 		</>
 	);
 }
@@ -204,7 +251,7 @@ function SaveButton() {
 
 	return (
 		<button
-			class={styles.resetButton}
+			class={styles.button}
 			onClick={() => {
 				if (state() !== SaveState.SAVING) {
 					setState(SaveState.SAVING);
@@ -225,156 +272,190 @@ function SaveButton() {
 /**
  * Component that allows the user to edit scrobbler properties for the scrobblers that support them.
  */
-function Properties(props: { scrobbler: Scrobbler }) {
-	const { scrobbler } = props;
-	const label = scrobbler.getLabel();
-	if (!labelHasProperties(label)) {
-		return <></>;
-	}
-	const [properties, setProperties] = createResource(
-		scrobbler.getUserProperties.bind(scrobbler),
-	);
+function Properties(props: { scrobbler: Scrobbler | null }) {
+	const [properties, setProperties] = createResource(() => {
+		if (props.scrobbler) {
+			return props.scrobbler.getUserProperties();
+		}
+	});
+	const narrowedLabel = createMemo(() => {
+		const label = props.scrobbler?.getLabel();
+		if (labelHasProperties(label)) {
+			return label;
+		}
+	});
 	return (
-		<>
-			<h3>{t('accountsScrobblerProps')}</h3>
-			<For each={Object.entries(scrobblerPropertiesMap[label])}>
-				{([key, { type, title, placeholder }]) => {
-					const typedKey =
-						key as keyof (typeof scrobblerPropertiesMap)[typeof label];
-					return (
-						<label class={styles.propLabel}>
-							{t(title)}
-							<input
-								class={styles.propInput}
-								type={type}
-								value={properties()?.[typedKey] || ''}
-								placeholder={t(placeholder)}
-								onInput={(e) => {
-									setProperties.mutate((o) => {
-										let data = o;
-										if (!data) {
-											data = {};
-										}
-										data[typedKey] = e.currentTarget.value;
-										scrobbler
-											.applyUserProperties(data)
-											.then(() => {
-												sendContentMessage({
-													type: 'updateScrobblerProperties',
-													payload: void 0,
-												});
+		<Show when={narrowedLabel()}>
+			{(label) => (
+				<>
+					<h3>{t('accountsScrobblerProps')}</h3>
+					<For each={Object.entries(scrobblerPropertiesMap[label()])}>
+						{([key, { type, title, placeholder }]) => {
+							const typedKey =
+								key as keyof (typeof scrobblerPropertiesMap)[ReturnType<
+									typeof label
+								>];
+							return (
+								<label class={styles.propLabel}>
+									{t(title)}
+									<input
+										class={styles.propInput}
+										type={type}
+										value={properties()?.[typedKey] || ''}
+										placeholder={t(placeholder)}
+										onInput={(e) => {
+											const scrobbler = props.scrobbler;
+											setProperties.mutate((o) => {
+												let data = o;
+												if (!data) {
+													data = {};
+												}
+												data[typedKey] =
+													e.currentTarget.value;
+												scrobbler
+													?.applyUserProperties(data)
+													.then(() => {
+														sendContentMessage({
+															type: 'updateScrobblerProperties',
+															payload: void 0,
+														});
+													});
+												return data;
 											});
-										return data;
-									});
-								}}
-							/>
-						</label>
-					);
-				}}
-			</For>
-			<SaveButton />
-		</>
+										}}
+									/>
+								</label>
+							);
+						}}
+					</For>
+					<SaveButton />
+				</>
+			)}
+		</Show>
 	);
 }
 
-function ArrayProperties(props: { scrobbler: Scrobbler }) {
-	const { scrobbler } = props;
-	const label = scrobbler.getLabel();
-	if (!labelHasArrayProperties(label)) {
-		return <></>;
-	}
-	const [properties, setProperties] = createResource(
-		scrobbler.getArrayProperties.bind(scrobbler),
-	);
+function ArrayProperties(props: { scrobbler: Scrobbler | null }) {
+	const [properties, setProperties] = createResource(() => {
+		if (props.scrobbler) {
+			return props.scrobbler.getArrayProperties();
+		}
+	});
+	const narrowedLabel = createMemo(() => {
+		const label = props.scrobbler?.getLabel();
+		if (labelHasArrayProperties(label)) {
+			return label;
+		}
+	});
 	const newProps = {
 		applicationName: '',
 		userApiUrl: '',
 	};
 	return (
-		<>
-			<h3>{t('accountsScrobblerProps')}</h3>
-			<div class={styles.arrayPropWrapper}>
-				<For each={properties()}>
-					{(item, index) => (
-						<div class={styles.arrayProps}>
-							<button
-								class={styles.deleteEditButton}
-								onClick={() => {
-									setProperties.mutate((o) => {
-										let data = o;
-										if (!data) {
-											data = [];
-										}
-										if (data.length <= index()) {
-											return data;
-										}
-										data = [
-											...data.slice(0, index()),
-											...data.slice(index() + 1),
-										];
-										scrobbler
-											.applyUserArrayProperties(data)
-											.then(() => {
-												sendContentMessage({
-													type: 'updateScrobblerProperties',
-													payload: void 0,
-												});
+		<Show when={narrowedLabel()}>
+			{(label) => (
+				<>
+					<h3>{t('accountsScrobblerProps')}</h3>
+					<div class={styles.arrayPropWrapper}>
+						<For each={properties()}>
+							{(item, index) => (
+								<div class={styles.arrayProps}>
+									<button
+										class={`${styles.button} ${styles.small} ${styles.marginRight}`}
+										onClick={() => {
+											const scrobbler = props.scrobbler;
+											const curIndex = index();
+											setProperties.mutate((o) => {
+												let data = o;
+												if (!data) {
+													data = [];
+												}
+												if (data.length <= curIndex) {
+													return data;
+												}
+												data = [
+													...data.slice(0, curIndex),
+													...data.slice(curIndex + 1),
+												];
+												scrobbler
+													?.applyUserArrayProperties(
+														data,
+													)
+													.then(() => {
+														sendContentMessage({
+															type: 'updateScrobblerProperties',
+															payload: void 0,
+														});
+													});
+												return data;
 											});
-										return data;
+										}}
+									>
+										<Delete />
+									</button>
+									<For each={Object.values(item)}>
+										{(val) => (
+											<span class={styles.arrayProp}>
+												{val}
+											</span>
+										)}
+									</For>
+								</div>
+							)}
+						</For>
+					</div>
+					<For
+						each={Object.entries(
+							scrobblerArrayPropertiesMap[label()],
+						)}
+					>
+						{([key, { type, title, placeholder }]) => {
+							const typedKey =
+								key as keyof (typeof scrobblerArrayPropertiesMap)[ReturnType<
+									typeof label
+								>];
+							return (
+								<label class={styles.propLabel}>
+									{t(title)}
+									<input
+										class={styles.propInput}
+										type={type}
+										placeholder={t(placeholder)}
+										onInput={(e) => {
+											newProps[typedKey] =
+												e.currentTarget.value;
+										}}
+									/>
+								</label>
+							);
+						}}
+					</For>
+					<button
+						class={styles.button}
+						onClick={() => {
+							const scrobbler = props.scrobbler;
+							setProperties.mutate((o) => {
+								let data = o;
+								if (!data) {
+									data = [];
+								}
+								scrobbler
+									?.addUserArrayProperties(newProps)
+									.then(() => {
+										sendContentMessage({
+											type: 'updateScrobblerProperties',
+											payload: void 0,
+										});
 									});
-								}}
-							>
-								<Delete />
-							</button>
-							<For each={Object.values(item)}>
-								{(val) => (
-									<span class={styles.arrayProp}>{val}</span>
-								)}
-							</For>
-						</div>
-					)}
-				</For>
-			</div>
-			<For each={Object.entries(scrobblerArrayPropertiesMap[label])}>
-				{([key, { type, title, placeholder }]) => {
-					const typedKey =
-						key as keyof (typeof scrobblerArrayPropertiesMap)[typeof label];
-					return (
-						<label class={styles.propLabel}>
-							{t(title)}
-							<input
-								class={styles.propInput}
-								type={type}
-								placeholder={t(placeholder)}
-								onInput={(e) => {
-									newProps[typedKey] = e.currentTarget.value;
-								}}
-							/>
-						</label>
-					);
-				}}
-			</For>
-			<button
-				class={styles.resetButton}
-				onClick={() => {
-					setProperties.mutate((o) => {
-						let data = o;
-						if (!data) {
-							data = [];
-						}
-						scrobbler.addUserArrayProperties(newProps).then(() => {
-							sendContentMessage({
-								type: 'updateScrobblerProperties',
-								payload: void 0,
+								return [...data, newProps];
 							});
-						});
-						return [...data, newProps];
-					});
-				}}
-			>
-				{t('accountsAddWebhook')}
-			</button>
-		</>
+						}}
+					>
+						{t('accountsAddWebhook')}
+					</button>
+				</>
+			)}
+		</Show>
 	);
 }
 
@@ -385,8 +466,11 @@ function ArrayProperties(props: { scrobbler: Scrobbler }) {
  * @returns true if scrobbler has properties, false if not
  */
 function labelHasProperties(
-	label: ScrobblerLabel,
+	label: string | undefined,
 ): label is keyof typeof scrobblerPropertiesMap {
+	if (!label) {
+		return false;
+	}
 	return label in scrobblerPropertiesMap;
 }
 
@@ -397,7 +481,10 @@ function labelHasProperties(
  * @returns true if scrobbler has array properties, false if not
  */
 function labelHasArrayProperties(
-	label: ScrobblerLabel,
+	label: string | undefined,
 ): label is keyof typeof scrobblerArrayPropertiesMap {
+	if (!label) {
+		return false;
+	}
 	return label in scrobblerArrayPropertiesMap;
 }
