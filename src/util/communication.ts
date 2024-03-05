@@ -1,4 +1,5 @@
 import { ConnectorMeta } from '@/core/connectors';
+import type { ChannelInfo } from '@/core/content/util';
 import { ControllerModeStr } from '@/core/object/controller/controller';
 import { ServiceCallResult } from '@/core/object/service-call-result';
 import { CloneableSong } from '@/core/object/song';
@@ -20,7 +21,10 @@ interface PopupCommunications {
 
 interface ContentCommunications {
 	controllerModeChange: {
-		payload: ControllerModeStr;
+		payload: {
+			mode: ControllerModeStr;
+			permanentMode: ControllerModeStr;
+		};
 		response: void;
 	};
 	songUpdate: {
@@ -59,48 +63,64 @@ interface ContentCommunications {
 		payload: {
 			song: CloneableSong;
 		};
-		response: Promise<ServiceCallResult[]>;
+		response: ServiceCallResult[];
 	};
 	setPaused: {
 		payload: {
 			song: CloneableSong;
 		};
-		response: void;
+		response: ServiceCallResult[];
 	};
 	setResumedPlaying: {
 		payload: {
 			song: CloneableSong;
 		};
-		response: void;
+		response: ServiceCallResult[];
 	};
 	scrobble: {
 		payload: {
-			song: CloneableSong;
+			songs: CloneableSong[];
+			currentlyPlaying: boolean;
 		};
-		response: Promise<ServiceCallResult[]>;
+		response: ServiceCallResult[][];
 	};
 	getSongInfo: {
 		payload: {
 			song: CloneableSong;
 		};
-		response: Promise<(Record<string, never> | ScrobblerSongInfo | null)[]>;
+		response: (Record<string, never> | ScrobblerSongInfo | null)[];
 	};
 	toggleLove: {
 		payload: {
 			song: CloneableSong;
 			isLoved: boolean;
+			shouldShowNotification: boolean;
 		};
-		response: Promise<(ServiceCallResult | Record<string, never>)[]>;
+		response: (ServiceCallResult | Record<string, never>)[];
 	};
 	sendListenBrainzRequest: {
 		payload: {
 			url: string;
 		};
-		response: Promise<string | null>;
+		response: string | null;
 	};
 	updateScrobblerProperties: {
 		payload: undefined;
 		response: void;
+	};
+	fetch: {
+		payload: {
+			url: string;
+			init?: RequestInit | undefined;
+		};
+		response: {
+			ok: boolean;
+			content: string;
+		};
+	};
+	isTabAudible: {
+		payload: undefined;
+		response: boolean;
 	};
 }
 
@@ -116,6 +136,7 @@ interface BackgroundCommunications {
 	toggleLove: {
 		payload: {
 			isLoved: boolean;
+			shouldShowNotification: boolean;
 		};
 		response: void;
 	};
@@ -145,6 +166,7 @@ interface BackgroundCommunications {
 		payload: undefined;
 		response: {
 			mode: ControllerModeStr;
+			permanentMode: ControllerModeStr;
 			song: CloneableSong | null;
 		};
 	};
@@ -155,6 +177,21 @@ interface BackgroundCommunications {
 	forceScrobbleSong: {
 		payload: undefined;
 		response: void;
+	};
+	addToBlocklist: {
+		payload: undefined;
+		response: void;
+	};
+	removeFromBlocklist: {
+		payload: undefined;
+		response: void;
+	};
+	getChannelDetails: {
+		payload: undefined;
+		response: {
+			connector: ConnectorMeta;
+			channelInfo: ChannelInfo | null | undefined;
+		};
 	};
 }
 
@@ -167,7 +204,9 @@ interface SpecificContentListener<K extends keyof BackgroundCommunications> {
 	fn: (
 		payload: BackgroundCommunications[K]['payload'],
 		sender: browser.Runtime.MessageSender,
-	) => BackgroundCommunications[K]['response'];
+	) =>
+		| BackgroundCommunications[K]['response']
+		| Promise<BackgroundCommunications[K]['response']>;
 }
 
 type ContentListener = <R>(
@@ -233,7 +272,9 @@ interface SpecificBackgroundListener<K extends keyof ContentCommunications> {
 	fn: (
 		payload: ContentCommunications[K]['payload'],
 		sender: browser.Runtime.MessageSender,
-	) => ContentCommunications[K]['response'];
+	) =>
+		| ContentCommunications[K]['response']
+		| Promise<ContentCommunications[K]['response']>;
 }
 
 type BackgroundListener = <R>(
@@ -296,7 +337,9 @@ interface SpecificPopupListener<K extends keyof PopupCommunications> {
 	fn: (
 		payload: PopupCommunications[K]['payload'],
 		sender: browser.Runtime.MessageSender,
-	) => PopupCommunications[K]['response'];
+	) =>
+		| PopupCommunications[K]['response']
+		| Promise<PopupCommunications[K]['response']>;
 }
 
 type PopupListener = <R>(

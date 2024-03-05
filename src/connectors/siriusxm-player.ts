@@ -15,22 +15,21 @@ const filter = MetadataFilter.createFilter({
 	track: [removeYear, removeCover, removeExclusive],
 });
 
-Connector.playerSelector = '.sxm-player-controls';
-Connector.artistSelector = '.sxm-player-controls .artist-name';
-Connector.trackSelector = '.sxm-player-controls .track-name';
+Connector.playerSelector = "*[class^='_playbackControls_']";
 
-Connector.isPlaying = () => {
-	return (
-		Util.getAttrFromSelectors(
-			'.sxm-player-controls .play-pause-btn',
-			'title',
-		) === 'Pause'
-	);
-};
+Connector.artistTrackSelector =
+	"*[class^='_playbackControls_'] *[class*='_title_']";
 
-Connector.trackArtSelector = '.album-image-cell img.album-image';
+Connector.trackArtSelector =
+	"*[class^='_playbackControls_'] *[class^='_trackImage_'] img[class^='_image-image']";
 
-Connector.isScrobblingAllowed = () => {
+Connector.playButtonSelector =
+	"*[class^='_playbackControls_'] button[aria-label='Play']";
+
+Connector.pauseButtonSelector =
+	"*[class^='_playbackControls_'] button[aria-label='Pause']";
+
+Connector.scrobblingDisallowedReason = () => {
 	const artist = Connector.getArtist()?.toLowerCase();
 	const track = Connector.getTrack()?.toLowerCase();
 	const filteredTerms = [
@@ -51,9 +50,11 @@ Connector.isScrobblingAllowed = () => {
 		'bdcast',
 	];
 
-	return !filteredTerms.some(
+	return filteredTerms.some(
 		(term) => artist?.includes(term) || track?.includes(term),
-	);
+	)
+		? 'FilteredTag'
+		: null;
 };
 
 Connector.applyFilter(filter);

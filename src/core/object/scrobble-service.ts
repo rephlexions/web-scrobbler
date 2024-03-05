@@ -4,11 +4,14 @@ import LibreFmScrobbler from '@/core/scrobbler/librefm-scrobbler';
 import ListenBrainzScrobbler from '@/core/scrobbler/listenbrainz/listenbrainz-scrobbler';
 import MalojaScrobbler from '@/core/scrobbler/maloja/maloja-scrobbler';
 import WebhookScrobbler from '@/core/scrobbler/webhook-scrobbler';
+import PleromaScrobbler from '@/core/scrobbler/pleroma/pleroma-scrobbler';
 import { ServiceCallResult } from '@/core/object/service-call-result';
 import { BaseSong } from '@/core/object/song';
 import { ScrobblerSongInfo } from '@/core/scrobbler/base-scrobbler';
 import ClonedSong from './cloned-song';
 import { debugLog } from '../content/util';
+import scrobbleCache from '../storage/scrobble-cache';
+import { getScrobbleStatus } from '../storage/wrapper';
 
 /**
  * Service to handle all scrobbling behavior.
@@ -19,7 +22,8 @@ export type Scrobbler =
 	| LibreFmScrobbler
 	| ListenBrainzScrobbler
 	| MalojaScrobbler
-	| WebhookScrobbler;
+	| WebhookScrobbler
+	| PleromaScrobbler;
 
 /**
  * Scrobblers that are registered and that can be bound.
@@ -30,6 +34,7 @@ const registeredScrobblers = [
 	new ListenBrainzScrobbler(),
 	new MalojaScrobbler(),
 	new WebhookScrobbler(),
+	new PleromaScrobbler(),
 ];
 
 export type ScrobblerLabel =
@@ -37,7 +42,8 @@ export type ScrobblerLabel =
 	| 'ListenBrainz'
 	| 'Libre.fm'
 	| 'Maloja'
-	| 'Webhook';
+	| 'Webhook'
+	| 'Pleroma';
 
 /**
  * Check if scrobbler is in given array of scrobblers.
@@ -221,24 +227,36 @@ class ScrobbleService {
 	 * @param song - Song instance
 	 * @returns Promise that will be resolved then the task will complete
 	 */
-	scrobble(song: BaseSong): Promise<ServiceCallResult[]> {
+	async scrobble(
+		songs: BaseSong[],
+		currentlyPlaying: boolean,
+	): Promise<ServiceCallResult[][]> {
 		debugLog(`Send "scrobble" request: ${this.boundScrobblers.length}`);
 
-		return Promise.all(
+		const res = await Promise.all(
 			this.boundScrobblers.map(async (scrobbler) => {
 				// Forward result (including errors) to caller
 				try {
 					return await scrobbler.scrobble(
-						scrobbler.applyFilter(song),
+						songs.map(scrobbler.applyFilter),
+						currentlyPlaying,
 					);
 				} catch (result) {
-					return this.processErrorResult(
+					return this.processScrobbleErrorResult(
 						scrobbler,
-						result as ServiceCallResult,
+						result as ServiceCallResult[],
 					);
 				}
 			}),
 		);
+		for (let i = 0; i < res[0].length; i++) {
+			await scrobbleCache.pushScrobble({
+				song: songs[i].getCloneableData(),
+				status: getScrobbleStatus(res, i),
+			});
+		}
+
+		return res;
 	}
 
 	/**
@@ -310,6 +328,36 @@ class ScrobbleService {
 
 		if (!(isOtherError || isAuthError)) {
 			throw new Error(`Invalid result: ${result}`);
+		}
+
+		if (isAuthError) {
+			// Don't unbind scrobblers which have tokens
+			const isReady = await scrobbler.isReadyForGrantAccess();
+			if (!isReady) {
+				this.unbindScrobbler(scrobbler);
+			}
+		}
+
+		// Forward result
+		return result;
+	}
+
+	/**
+	 * Process result received from scrobbler when scrobbling.
+	 * Scrobbling has array result so logic is slightly different
+	 * @param scrobbler - Scrobbler instance
+	 * @param result - API call result
+	 * @returns Promise resolved with result object
+	 */
+	async processScrobbleErrorResult(
+		scrobbler: Scrobbler,
+		result: ServiceCallResult[],
+	): Promise<ServiceCallResult[]> {
+		const isOtherError = result[0] === ServiceCallResult.ERROR_OTHER;
+		const isAuthError = result[0] === ServiceCallResult.ERROR_AUTH;
+
+		if (!(isOtherError || isAuthError)) {
+			throw new Error(`Invalid result: ${result[0]}`);
 		}
 
 		if (isAuthError) {

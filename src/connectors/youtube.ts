@@ -1,4 +1,4 @@
-import type { TrackInfoWithAlbum } from '@/core/types';
+import type { ArtistTrackInfo, TrackInfoWithAlbum } from '@/core/types';
 
 export {};
 
@@ -30,6 +30,7 @@ const channelNameSelector = [
 	'.slim-owner-channel-name .yt-core-attributed-string',
 ];
 const videoDescriptionSelector = [
+	'#description.ytd-expandable-video-description-body-renderer',
 	'#meta-contents #description',
 	'.crawler-full-description',
 ];
@@ -74,7 +75,12 @@ const getTrackInfoFromYoutubeMusicCache: {
 	};
 } = {};
 
-const trackInfoGetters = [
+const trackInfoGetters: (() =>
+	| ArtistTrackInfo
+	| null
+	| undefined
+	| Record<string, never>
+	| TrackInfoWithAlbum)[] = [
 	getTrackInfoFromChapters,
 	getTrackInfoFromYoutubeMusic,
 	getTrackInfoFromDescription,
@@ -92,6 +98,24 @@ Connector.scrobbleInfoStyle = {
 	fontSize: '1.17em',
 	fontWeight: '700',
 };
+
+Connector.loveButtonSelector =
+	'ytd-watch-metadata like-button-view-model button[aria-pressed="false"]';
+
+Connector.getChannelId = () =>
+	new URL(
+		(
+			Util.queryElements([
+				'#upload-info .ytd-channel-name .yt-simple-endpoint',
+				'.slim-owner-icon-and-title',
+			]) as NodeListOf<HTMLAnchorElement>
+		)?.[0]?.href ?? 'https://youtube.com/',
+	).pathname.slice(1);
+
+Connector.channelLabelSelector = [
+	'#primary #title+#top-row ytd-channel-name .yt-formatted-string',
+	'.slim-owner-icon-and-title .yt-core-attributed-string',
+];
 
 Connector.getTrackInfo = () => {
 	const trackInfo: TrackInfoWithAlbum = {};
@@ -119,6 +143,10 @@ Connector.getTrackInfo = () => {
 
 		if (!trackInfo.track) {
 			trackInfo.track = currentTrackInfo.track;
+		}
+
+		if (!trackInfo.album && 'album' in currentTrackInfo) {
+			trackInfo.album = currentTrackInfo.album;
 		}
 
 		if (!Util.isArtistTrackEmpty(trackInfo)) {
@@ -163,14 +191,14 @@ Connector.getUniqueID = () => {
 	return getVideoId();
 };
 
-Connector.isScrobblingAllowed = () => {
+Connector.scrobblingDisallowedReason = () => {
 	if (document.querySelector('.ad-showing')) {
-		return false;
+		return 'IsAd';
 	}
 
 	// Workaround to prevent scrobbling the video opened in a background tab.
 	if (!isVideoStartedPlaying()) {
-		return false;
+		return 'Other';
 	}
 
 	if (scrobbleMusicRecognisedOnly) {
@@ -180,21 +208,21 @@ Connector.isScrobblingAllowed = () => {
 		if (!ytMusicCache) {
 			// start loading getTrackInfoFromYoutubeMusic
 			getTrackInfoFromYoutubeMusic();
-			return false;
+			return 'IsLoading';
 		}
 
 		if (!ytMusicCache.done) {
 			// not done loading yet
-			return false;
+			return 'IsLoading';
 		}
 
 		if (!ytMusicCache.recognisedByYtMusic) {
 			// not recognised!
-			return false;
+			return 'NotOnYouTubeMusic';
 		}
 	}
 
-	return isVideoCategoryAllowed();
+	return isVideoCategoryAllowed() ? null : 'ForbiddenYouTubeCategory';
 };
 
 Connector.applyFilter(
@@ -339,7 +367,7 @@ async function readConnectorOptions() {
 }
 
 function getVideoDescription() {
-	return Util.getTextFromSelectors(videoDescriptionSelector);
+	return Util.getTextFromSelectors(videoDescriptionSelector)?.trim() ?? null;
 }
 
 function getTrackInfoFromDescription() {
@@ -354,7 +382,10 @@ function getTrackInfoFromDescription() {
 	return artistTrackFromDescription;
 }
 
-function getTrackInfoFromYoutubeMusic() {
+function getTrackInfoFromYoutubeMusic():
+	| ArtistTrackInfo
+	| Record<string, never>
+	| undefined {
 	// if neither getTrackInfoFromYtMusicEnabled nor scrobbleMusicRecognisedOnly
 	// are enabled, there is no need to run this getter
 	if (!getTrackInfoFromYtMusicEnabled && !scrobbleMusicRecognisedOnly) {
@@ -467,7 +498,7 @@ function getTrackInfoFromChapters() {
 	return artistTrack;
 }
 
-function getTrackInfoFromTitle() {
+function getTrackInfoFromTitle(): ArtistTrackInfo {
 	let { artist, track } = Util.processYtVideoTitle(
 		Util.getTextFromSelectors(videoTitleSelector),
 	);
