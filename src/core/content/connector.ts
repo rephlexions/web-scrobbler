@@ -1,8 +1,8 @@
 import * as MetadataFilter from '@web-scrobbler/metadata-filter';
 import browser from 'webextension-polyfill';
-import { ArtistTrackInfo, BaseState, State, TimeInfo } from '@/core/types';
+import type { ArtistTrackInfo, BaseState, State, TimeInfo } from '@/core/types';
 import * as Util from '@/core/content/util';
-import { ConnectorMeta } from '../connectors';
+import type { ConnectorMeta } from '../connectors';
 import type { DisallowedReason } from '../object/disallowed-reason';
 import { sendContentMessage } from '@/util/communication';
 
@@ -371,7 +371,7 @@ export default class BaseConnector {
 	 * @returns Check result
 	 */
 	public isTrackArtDefault: (
-		trackArtUrl?: string | null | undefined,
+		trackArtUrl?: string | null,
 	) => boolean | null | undefined = () => false;
 
 	/**
